@@ -934,44 +934,46 @@ public class AzureVMCloud extends Cloud {
                                 PoolLock.provisionUnlock(template);
                             }
                         }
-
-                        private void handleFailure(
-                                AzureVMAgentTemplate template,
-                                String vmName,
-                                Exception e,
-                                FailureStage stage) {
-                            // Check if this is a deployment timeout and the flag is set to keep the VM
-                            boolean isDeploymentTimeout = e.getMessage() != null 
-                                    && e.getMessage().contains("max timeout reached");
-                            boolean shouldKeepVM = isDeploymentTimeout 
-                                    && template.isKeepVMOnDeploymentTimeout();
-
-                            // Attempt to terminate whatever was created if any
-                            if (vmName != null && !shouldKeepVM) {
-                                try {
-                                    getServiceDelegate().terminateVirtualMachine(
-                                            vmName,
-                                            template.getResourceGroupName(),
-                                            template.getUsePrivateIP());
-                                } catch (AzureCloudException terminateEx) {
-                                    LOGGER.log(
-                                            Level.SEVERE,
-                                            String.format("Failure terminating previous failed agent '%s'", vmName),
-                                            terminateEx);
-                                    // Do not throw to avoid it being recorded
-                                }
-                            } else if (shouldKeepVM) {
-                                LOGGER.log(
-                                        Level.INFO,
-                                        String.format("Keeping VM '%s' due to deployment timeout and keepVMOnDeploymentTimeout flag", vmName));
-                            }
-                            template.retrieveAzureCloudReference().adjustApproximateVirtualMachineCount(-1,
-                                    template);
-                            // Update the template status given this new issue.
-                            template.handleTemplateProvisioningFailure(e.getMessage(), stage);
-                        }
                     })));
         }
+    }
+
+    private void handleFailure(
+            AzureVMAgentTemplate template,
+            String vmName,
+            Exception e,
+            FailureStage stage) {
+        // Check if this is a deployment timeout and the flag is set to keep the VM
+        boolean isDeploymentTimeout = e.getMessage() != null
+                && e.getMessage().contains("max timeout reached");
+        boolean shouldKeepVM = isDeploymentTimeout
+                && template.isKeepVMOnDeploymentTimeout();
+
+        // Attempt to terminate whatever was created if any
+        if (vmName != null && !shouldKeepVM) {
+            try {
+                getServiceDelegate().terminateVirtualMachine(
+                        vmName,
+                        template.getResourceGroupName(),
+                        template.getUsePrivateIP());
+            } catch (AzureCloudException terminateEx) {
+                LOGGER.log(
+                        Level.SEVERE,
+                        String.format("Failure terminating previous failed agent '%s'", vmName),
+                        terminateEx);
+                // Do not throw to avoid it being recorded
+            }
+        } else if (shouldKeepVM) {
+            LOGGER.log(
+                    Level.INFO,
+                    String.format(
+                            "Keeping VM '%s' for troubleshooting (deployment timeout)",
+                            vmName));
+        }
+        template.retrieveAzureCloudReference().adjustApproximateVirtualMachineCount(-1,
+                template);
+        // Update the template status given this new issue.
+        template.handleTemplateProvisioningFailure(e.getMessage(), stage);
     }
 
     private void retrySshConnect(final AzureVMComputer azureComputer) throws ExecutionException, InterruptedException {
