@@ -375,6 +375,8 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
     private boolean enableUAMI;
     private boolean useEntraIdForStorageAccount;
 
+    private boolean keepVMOnDeploymentTimeout;
+
     private String uamiID;
 
     private String javaPath;
@@ -1361,6 +1363,15 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
     @DataBoundSetter
     public void setLicenseType(String licenseType) {
         this.licenseType = licenseType;
+    }
+
+    public boolean isKeepVMOnDeploymentTimeout() {
+        return keepVMOnDeploymentTimeout;
+    }
+
+    @DataBoundSetter
+    public void setKeepVMOnDeploymentTimeout(boolean keepVMOnDeploymentTimeout) {
+        this.keepVMOnDeploymentTimeout = keepVMOnDeploymentTimeout;
     }
 
     /**

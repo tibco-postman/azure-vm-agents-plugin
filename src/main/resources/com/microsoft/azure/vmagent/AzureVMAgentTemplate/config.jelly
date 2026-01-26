@@ -126,6 +126,11 @@
       <f:number default="10"/>
     </f:entry>
 
+    <f:entry title="${%Keep_VM_if_deployment_times_out}" field="keepVMOnDeploymentTimeout"
+             help="/plugin/azure-vm-agents/help-keepVMOnDeploymentTimeout.html">
+      <f:checkbox/>
+    </f:entry>
+
     <f:entry title="${%Spot instance}" field="spotInstance">
       <f:checkbox/>
     </f:entry>
