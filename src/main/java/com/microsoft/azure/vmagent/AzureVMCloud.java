@@ -940,8 +940,14 @@ public class AzureVMCloud extends Cloud {
                                 String vmName,
                                 Exception e,
                                 FailureStage stage) {
+                            // Check if this is a deployment timeout and the flag is set to keep the VM
+                            boolean isDeploymentTimeout = e.getMessage() != null 
+                                    && e.getMessage().contains("max timeout reached");
+                            boolean shouldKeepVM = isDeploymentTimeout 
+                                    && template.isKeepVMOnDeploymentTimeout();
+
                             // Attempt to terminate whatever was created if any
-                            if (vmName != null) {
+                            if (vmName != null && !shouldKeepVM) {
                                 try {
                                     getServiceDelegate().terminateVirtualMachine(
                                             vmName,
@@ -954,6 +960,10 @@ public class AzureVMCloud extends Cloud {
                                             terminateEx);
                                     // Do not throw to avoid it being recorded
                                 }
+                            } else if (shouldKeepVM) {
+                                LOGGER.log(
+                                        Level.INFO,
+                                        String.format("Keeping VM '%s' due to deployment timeout and keepVMOnDeploymentTimeout flag", vmName));
                             }
                             template.retrieveAzureCloudReference().adjustApproximateVirtualMachineCount(-1,
                                     template);
