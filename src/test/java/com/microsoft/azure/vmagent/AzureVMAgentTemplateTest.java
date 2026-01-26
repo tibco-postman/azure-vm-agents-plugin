@@ -117,6 +117,27 @@ class AzureVMAgentTemplateTest {
         assertThat(actual, equalTo(Integer.MAX_VALUE));
     }
 
+    @Test
+    void keepVMOnDeploymentTimeoutDefaultsToFalse() {
+        // Given
+        AzureVMAgentTemplate template = mkTemplate();
+
+        // When & Then
+        assertThat(template.isKeepVMOnDeploymentTimeout(), equalTo(false));
+    }
+
+    @Test
+    void keepVMOnDeploymentTimeoutCanBeSet() {
+        // Given
+        AzureVMAgentTemplate template = mkTemplate();
+
+        // When
+        template.setKeepVMOnDeploymentTimeout(true);
+
+        // Then
+        assertThat(template.isKeepVMOnDeploymentTimeout(), equalTo(true));
+    }
+
     private static AzureVMAgentTemplate mkTemplate() {
         return new AzureVMAgentTemplate(
                 "testTemplate", null, null, null, null, null, null, null, null, null, null, null,
