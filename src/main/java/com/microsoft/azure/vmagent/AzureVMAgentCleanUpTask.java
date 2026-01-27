@@ -154,6 +154,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
 
     private static final long SUCCESSFUL_DEPLOYMENT_TIMEOUT_IN_MINUTES = 60;
     private static final long FAILING_DEPLOYMENT_TIMEOUT_IN_MINUTES = 60 * 8;
+    // Maximum retention time for failed deployments when keepFailedDeployment is enabled (30 days)
+    private static final long MAX_KEPT_FAILED_DEPLOYMENT_TIMEOUT_IN_MINUTES = 60 * 24 * 30;
     private static final int MAX_DELETE_ATTEMPTS = 3;
     private static final Logger LOGGER = Logger.getLogger(AzureVMAgentCleanUpTask.class.getName());
 
@@ -286,11 +288,12 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
 
                 if (!state.equalsIgnoreCase("succeeded") && diffTimeInMinutes > failTimeoutInMinutes) {
                     // Check if we should keep failed deployments
-                    if (info.isKeepFailedDeployment()) {
+                    if (info.isKeepFailedDeployment() && diffTimeInMinutes <= MAX_KEPT_FAILED_DEPLOYMENT_TIMEOUT_IN_MINUTES) {
                         LOGGER.log(getNormalLoggingLevel(),
                                 "Failed deployment {0} older than {1} minutes, but keepFailedDeployment is enabled "
-                                + "(template: {2}), preserving deployment record",
-                                new Object[]{info.getDeploymentName(), failTimeoutInMinutes, info.getTemplateName()});
+                                + "(template: {2}), preserving deployment record (age: {3} minutes, max retention: {4} days)",
+                                new Object[]{info.getDeploymentName(), failTimeoutInMinutes, info.getTemplateName(),
+                                        diffTimeInMinutes, MAX_KEPT_FAILED_DEPLOYMENT_TIMEOUT_IN_MINUTES / (60 * 24)});
                         
                         if (firstBackInQueue == null) {
                             firstBackInQueue = info;
@@ -298,8 +301,14 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         // Put it back in the queue to keep it
                         deploymentsToClean.add(info);
                     } else {
-                        LOGGER.log(getNormalLoggingLevel(), "Failed deployment older than {0} minutes, deleting",
-                                failTimeoutInMinutes);
+                        if (info.isKeepFailedDeployment()) {
+                            LOGGER.log(getNormalLoggingLevel(),
+                                    "Failed deployment {0} exceeded maximum retention period ({1} days), deleting",
+                                    new Object[]{info.getDeploymentName(), MAX_KEPT_FAILED_DEPLOYMENT_TIMEOUT_IN_MINUTES / (60 * 24)});
+                        } else {
+                            LOGGER.log(getNormalLoggingLevel(), "Failed deployment older than {0} minutes, deleting",
+                                    failTimeoutInMinutes);
+                        }
                         // Delete the deployment
                         azureClient.deployments()
                                 .deleteByResourceGroup(info.getResourceGroupName(), info.getDeploymentName());
@@ -315,8 +324,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                     // Delete the deployment
                     azureClient.deployments()
                             .deleteByResourceGroup(info.getResourceGroupName(), info.getDeploymentName());
-                    if (StringUtils.isNotBlank(info.scriptUri)) {
-                        delegate.removeStorageBlob(new URI(info.scriptUri), info.getResourceGroupName(),
+                    if (StringUtils.isNotBlank(info.getScriptUri())) {
+                        delegate.removeStorageBlob(new URI(info.getScriptUri()), info.getResourceGroupName(),
                                 cloud.getAzureCredentialsId(), info.isUseEntraIdForStorageAccount());
                     }
                 } else {
