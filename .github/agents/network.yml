@@ -1,0 +1,9 @@
+# Network configuration for GitHub Copilot agents
+# This file configures network access for the sandbox environment
+
+# Allow access to Jenkins repositories required for Maven builds
+allowedDomains:
+  - repo.jenkins-ci.org
+  - repo.maven.apache.org
+  - repo1.maven.org
+  - central.maven.org
