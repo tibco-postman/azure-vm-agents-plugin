@@ -489,6 +489,26 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         break;
                     }
                 }
+                
+                // Check if this resource's template has keepFailedVMDeployments enabled
+                if (!shouldSkipDeletion && tags.containsKey(Constants.AZURE_TEMPLATE_TAG_NAME)) {
+                    String templateName = tags.get(Constants.AZURE_TEMPLATE_TAG_NAME);
+                    try {
+                        AzureVMAgentTemplate template = cloud.getTemplate(templateName);
+                        if (template != null && template.isKeepFailedVMDeployments()) {
+                            LOGGER.log(getNormalLoggingLevel(),
+                                    "cleanLeakedResources: resource {0} has keepFailedVMDeployments enabled "
+                                    + "(template: {1}), skipping deletion",
+                                    new Object[]{resource.name(), templateName});
+                            shouldSkipDeletion = true;
+                        }
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING,
+                                "cleanLeakedResources: failed to check template {0} for resource {1}",
+                                new Object[]{templateName, resource.name()});
+                    }
+                }
+                
                 // we're not removing storage accounts of networks - someone else might be using them
                 if (shouldSkipDeletion
                         || StringUtils.containsIgnoreCase(resource.type(), "StorageAccounts")
