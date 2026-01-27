@@ -142,6 +142,8 @@ public class AzureVMCloud extends Cloud {
 
     private List<AzureTagPair> cloudTags;
 
+    private boolean keepFailedVMDeployments;
+
     //The map should not be accessed without acquiring a lock of the map
     private transient Map<AzureVMAgent, AtomicInteger> agentLocks = new HashMap<>();
 
@@ -354,6 +356,15 @@ public class AzureVMCloud extends Cloud {
     @DataBoundSetter
     public void setCloudTags(List<AzureTagPair> cloudTags) {
         this.cloudTags = cloudTags;
+    }
+
+    public boolean isKeepFailedVMDeployments() {
+        return keepFailedVMDeployments;
+    }
+
+    @DataBoundSetter
+    public void setKeepFailedVMDeployments(boolean keepFailedVMDeployments) {
+        this.keepFailedVMDeployments = keepFailedVMDeployments;
     }
 
     /**
