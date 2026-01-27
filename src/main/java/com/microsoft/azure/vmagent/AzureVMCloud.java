@@ -953,25 +953,19 @@ public class AzureVMCloud extends Cloud {
                                 Exception e,
                                 FailureStage stage) {
                             boolean keepFailedDeployment = template.isKeepFailedVMDeployments();
-
-                            // Terminate VM unless keepFailedDeployments is enabled
                             if (vmName != null && !keepFailedDeployment) {
                                 try {
                                     getServiceDelegate().terminateVirtualMachine(
-                                            vmName,
-                                            template.getResourceGroupName(),
-                                            template.getUsePrivateIP());
+                                            vmName, template.getResourceGroupName(), template.getUsePrivateIP());
                                 } catch (AzureCloudException terminateEx) {
                                     LOGGER.log(Level.SEVERE,
                                             String.format("Failure terminating previous failed agent '%s'", vmName),
                                             terminateEx);
                                 }
                             } else if (vmName != null) {
-                                LOGGER.log(Level.INFO,
-                                        "Keeping failed VM {0} for template {1} (stage: {2})",
+                                LOGGER.log(Level.INFO, "Keeping failed VM {0} for template {1} (stage: {2})",
                                         new Object[]{vmName, template.getTemplateName(), stage});
                             }
-
                             template.retrieveAzureCloudReference().adjustApproximateVirtualMachineCount(-1,
                                     template);
                             template.handleTemplateProvisioningFailure(e.getMessage(), stage);
