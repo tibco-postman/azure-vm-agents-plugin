@@ -615,6 +615,18 @@ public class AzureVMCloud extends Cloud {
             }
         } while (triesLeft > 0);
 
+        // Log information about keepFailedVMDeployments setting before throwing timeout exception
+        if (template.isKeepFailedVMDeployments()) {
+            LOGGER.log(Level.INFO,
+                    "Deployment {0} timeout reached. Keep failed VM deployments is enabled for template {1}, "
+                    + "VM {2} and its resources will be preserved for debugging.",
+                    new Object[]{deploymentName, template.getTemplateName(), vmName});
+        } else {
+            LOGGER.log(Level.INFO,
+                    "Deployment {0} timeout reached. VM {1} will be cleaned up.",
+                    new Object[]{deploymentName, vmName});
+        }
+
         throw AzureCloudException.create(String.format(
                 "Deployment %s failed, max timeout reached (%d seconds)",
                 deploymentName, timeoutInSeconds));
@@ -940,8 +952,19 @@ public class AzureVMCloud extends Cloud {
                                 String vmName,
                                 Exception e,
                                 FailureStage stage) {
+                            // Check if we should keep failed deployments
+                            boolean keepFailedDeployment = template.isKeepFailedVMDeployments();
+                            
+                            if (keepFailedDeployment) {
+                                LOGGER.log(Level.INFO,
+                                        "Keep failed VM deployments is enabled for template {0}. "
+                                        + "VM {1} will be kept for debugging (failure stage: {2})",
+                                        new Object[]{template.getTemplateName(), vmName, stage});
+                            }
+                            
                             // Attempt to terminate whatever was created if any
-                            if (vmName != null) {
+                            // Skip termination if keepFailedDeployments is enabled and this is a deployment/provisioning failure
+                            if (vmName != null && !keepFailedDeployment) {
                                 try {
                                     getServiceDelegate().terminateVirtualMachine(
                                             vmName,
@@ -954,7 +977,12 @@ public class AzureVMCloud extends Cloud {
                                             terminateEx);
                                     // Do not throw to avoid it being recorded
                                 }
+                            } else if (vmName != null && keepFailedDeployment) {
+                                LOGGER.log(Level.INFO,
+                                        "Skipping termination of VM {0} due to keepFailedVMDeployments setting",
+                                        vmName);
                             }
+                            
                             template.retrieveAzureCloudReference().adjustApproximateVirtualMachineCount(-1,
                                     template);
                             // Update the template status given this new issue.

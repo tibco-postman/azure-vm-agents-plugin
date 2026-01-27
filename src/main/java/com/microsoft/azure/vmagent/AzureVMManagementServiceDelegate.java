@@ -764,7 +764,8 @@ public final class AzureVMManagementServiceDelegate {
             // Register the deployment for cleanup
             deploymentRegistrar.registerDeployment(
                     cloudName, template.getResourceGroupName(), deploymentName, scriptUri,
-                    template.isUseEntraIdForStorageAccount());
+                    template.isUseEntraIdForStorageAccount(), template.getTemplateName(),
+                    template.isKeepFailedVMDeployments());
             // Create the deployment
 
             String templateJson = tmp.toString();

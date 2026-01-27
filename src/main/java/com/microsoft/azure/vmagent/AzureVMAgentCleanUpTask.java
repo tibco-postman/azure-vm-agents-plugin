@@ -73,7 +73,7 @@ import static com.microsoft.azure.vmagent.util.Constants.MILLIS_IN_MINUTE;
 public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
 
     private static class DeploymentInfo implements Serializable {
-        private static final long serialVersionUID = 888154365;
+        private static final long serialVersionUID = 888154366; // Incremented due to class structure change
 
         DeploymentInfo(String cloudName,
                        String resourceGroupName,
@@ -81,12 +81,26 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                        String scriptUri,
                        int deleteAttempts,
                        boolean isUseEntraIdForStorageAccount) {
+            this(cloudName, resourceGroupName, deploymentName, scriptUri, deleteAttempts,
+                    isUseEntraIdForStorageAccount, null, false);
+        }
+
+        DeploymentInfo(String cloudName,
+                       String resourceGroupName,
+                       String deploymentName,
+                       String scriptUri,
+                       int deleteAttempts,
+                       boolean isUseEntraIdForStorageAccount,
+                       String templateName,
+                       boolean keepFailedDeployment) {
             this.cloudName = cloudName;
             this.deploymentName = deploymentName;
             this.resourceGroupName = resourceGroupName;
             this.scriptUri = scriptUri;
             this.attemptsRemaining = deleteAttempts;
             this.isUseEntraIdForStorageAccount = isUseEntraIdForStorageAccount;
+            this.templateName = templateName;
+            this.keepFailedDeployment = keepFailedDeployment;
         }
 
         String getCloudName() {
@@ -109,6 +123,14 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
             return isUseEntraIdForStorageAccount;
         }
 
+        String getTemplateName() {
+            return templateName;
+        }
+
+        boolean isKeepFailedDeployment() {
+            return keepFailedDeployment;
+        }
+
         boolean hasAttemptsRemaining() {
             return attemptsRemaining > 0;
         }
@@ -123,6 +145,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
         private final String scriptUri;
         private int attemptsRemaining;
         private final boolean isUseEntraIdForStorageAccount;
+        private final String templateName;
+        private final boolean keepFailedDeployment;
     }
 
     private static final int CLEAN_TIMEOUT_IN_MINUTES = 15;
@@ -174,11 +198,22 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                                        String deploymentName,
                                        String scriptUri,
                                        boolean isUseEntraIdForStorageAccount) {
-            LOGGER.log(Level.FINE, "Registering deployment {0} in {1}",
-                    new Object[]{deploymentName, resourceGroupName});
+            registerDeployment(cloudName, resourceGroupName, deploymentName, scriptUri,
+                    isUseEntraIdForStorageAccount, null, false);
+        }
+
+        public void registerDeployment(String cloudName,
+                                       String resourceGroupName,
+                                       String deploymentName,
+                                       String scriptUri,
+                                       boolean isUseEntraIdForStorageAccount,
+                                       String templateName,
+                                       boolean keepFailedDeployment) {
+            LOGGER.log(Level.FINE, "Registering deployment {0} in {1} (template: {2}, keepFailed: {3})",
+                    new Object[]{deploymentName, resourceGroupName, templateName, keepFailedDeployment});
             DeploymentInfo newDeploymentToClean =
                     new DeploymentInfo(cloudName, resourceGroupName, deploymentName, scriptUri, MAX_DELETE_ATTEMPTS,
-                            isUseEntraIdForStorageAccount);
+                            isUseEntraIdForStorageAccount, templateName, keepFailedDeployment);
             deploymentsToClean.add(newDeploymentToClean);
 
             syncDeploymentsToClean();
@@ -250,14 +285,28 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                 String state = deployment.provisioningState();
 
                 if (!state.equalsIgnoreCase("succeeded") && diffTimeInMinutes > failTimeoutInMinutes) {
-                    LOGGER.log(getNormalLoggingLevel(), "Failed deployment older than {0} minutes, deleting",
-                            failTimeoutInMinutes);
-                    // Delete the deployment
-                    azureClient.deployments()
-                            .deleteByResourceGroup(info.getResourceGroupName(), info.getDeploymentName());
-                    if (StringUtils.isNotBlank(info.scriptUri)) {
-                        delegate.removeStorageBlob(new URI(info.scriptUri), info.getResourceGroupName(),
-                                cloud.getAzureCredentialsId(), info.isUseEntraIdForStorageAccount());
+                    // Check if we should keep failed deployments
+                    if (info.isKeepFailedDeployment()) {
+                        LOGGER.log(getNormalLoggingLevel(),
+                                "Failed deployment {0} older than {1} minutes, but keepFailedDeployment is enabled "
+                                + "(template: {2}), preserving deployment record",
+                                new Object[]{info.getDeploymentName(), failTimeoutInMinutes, info.getTemplateName()});
+                        
+                        if (firstBackInQueue == null) {
+                            firstBackInQueue = info;
+                        }
+                        // Put it back in the queue to keep it
+                        deploymentsToClean.add(info);
+                    } else {
+                        LOGGER.log(getNormalLoggingLevel(), "Failed deployment older than {0} minutes, deleting",
+                                failTimeoutInMinutes);
+                        // Delete the deployment
+                        azureClient.deployments()
+                                .deleteByResourceGroup(info.getResourceGroupName(), info.getDeploymentName());
+                        if (StringUtils.isNotBlank(info.getScriptUri())) {
+                            delegate.removeStorageBlob(new URI(info.getScriptUri()), info.getResourceGroupName(),
+                                    cloud.getAzureCredentialsId(), info.isUseEntraIdForStorageAccount());
+                        }
                     }
                 } else if (state.equalsIgnoreCase("succeeded")
                         && diffTimeInMinutes > successTimeoutInMinutes) {
