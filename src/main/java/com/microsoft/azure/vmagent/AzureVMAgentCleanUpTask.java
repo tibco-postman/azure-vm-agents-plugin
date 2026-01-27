@@ -251,7 +251,7 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
         DeploymentInfo firstBackInQueue = null;
         ConcurrentLinkedQueue<DeploymentInfo> deploymentsToClean
                 = DeploymentRegistrar.getInstance().getDeploymentsToClean();
-        
+
         // Log deployments that have keepFailedDeployment enabled
         long protectedDeployments = deploymentsToClean.stream()
                 .filter(DeploymentInfo::isKeepFailedDeployment)
@@ -261,7 +261,7 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                     "{0} deployment(s) in queue have keepFailedDeployment protection enabled",
                     protectedDeployments);
         }
-        
+
         while (!deploymentsToClean.isEmpty() && firstBackInQueue != deploymentsToClean.peek()) {
             DeploymentInfo info = deploymentsToClean.remove();
 
