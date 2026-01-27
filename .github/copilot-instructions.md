@@ -94,7 +94,11 @@ src/
 │   │   └── exceptions/                    # Custom exceptions
 │   ├── resources/
 │   │   ├── com/microsoft/azure/vmagent/   # Jelly UI files and Messages.properties
-│   │   ├── scripts/                       # Ubuntu install scripts (Git, Maven, Docker, etc.)
+│   │   ├── scripts/                       # Install scripts for both platforms
+│   │   │   ├── ubuntu*.sh                 # Ubuntu install scripts (Git, Maven, Docker, Java, Qemu)
+│   │   │   ├── windows*.ps1               # Windows install scripts (Git, Maven, Java, Jnlp, Qemu)
+│   │   │   ├── init.ps1                   # Windows initialization
+│   │   │   └── sshInit.ps1                # Windows SSH initialization
 │   │   ├── *.json                         # ARM templates for VM provisioning
 │   │   └── index.jelly                    # Plugin metadata
 │   └── webapp/                            # Help HTML files (help-*.html)
@@ -252,7 +256,8 @@ The codebase has several TODOs that indicate areas needing careful changes:
 4. Update integration tests (`IT*.java`)
 
 **Update build scripts:**
-- Shell scripts in `src/main/resources/scripts/*.sh`
+- Ubuntu shell scripts in `src/main/resources/scripts/ubuntu*.sh`
+- Windows PowerShell scripts in `src/main/resources/scripts/windows*.ps1` and `*.ps1`
 - Init script examples in `docs/init-scripts/`
 
 ## Important Notes
