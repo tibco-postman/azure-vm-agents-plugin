@@ -429,20 +429,17 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                                 + "valid credential");
                 return;
             }
-
             final AzureVMManagementServiceDelegate serviceDelegate = cloud.getServiceDelegate();
             // can't use listByTag because for some reason that method strips all the tags from the outputted resources
             // (https://github.com/Azure/azure-sdk-for-java/issues/1436)
             final PagedIterable<GenericResource> resources = azureClient.genericResources()
                     .listByResourceGroup(resourceGroup);
 
-
             if (resources == null || !resources.iterator().hasNext()) {
                 LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: No resources found in rg: "
                     + resourceGroup);
                 return;
             }
-
             final PriorityQueue<GenericResource> resourcesMarkedForDeletion = new PriorityQueue<>(10,
                     new Comparator<GenericResource>() {
                         @Override
@@ -489,7 +486,6 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         break;
                     }
                 }
-                
                 // Check if this resource's template has keepFailedVMDeployments enabled
                 if (!shouldSkipDeletion && tags.containsKey(Constants.AZURE_TEMPLATE_TAG_NAME)) {
                     String templateName = tags.get(Constants.AZURE_TEMPLATE_TAG_NAME);
@@ -508,10 +504,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                                 new Object[]{templateName, resource.name()});
                     }
                 }
-                
                 // we're not removing storage accounts of networks - someone else might be using them
-                if (shouldSkipDeletion
-                        || StringUtils.containsIgnoreCase(resource.type(), "StorageAccounts")
+                if (shouldSkipDeletion || StringUtils.containsIgnoreCase(resource.type(), "StorageAccounts")
                         || StringUtils.containsIgnoreCase(resource.type(), "virtualNetworks")) {
                     continue;
                 }
@@ -520,7 +514,6 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
 
             LOGGER.log(getNormalLoggingLevel(), String.format("cleanLeakedResources: %d resources marked for deletion",
                     resourcesMarkedForDeletion.size()));
-
             while (!resourcesMarkedForDeletion.isEmpty()) {
                 try {
                     final GenericResource resource = resourcesMarkedForDeletion.poll();
@@ -528,10 +521,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: resource was null continuing");
                         continue;
                     }
-                    LOGGER.log(getNormalLoggingLevel(),
-                        "cleanLeakedResources: looking at {0} from resource group {1}",
+                    LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: looking at {0} from resource group {1}",
                         new Object[]{resource.name(), resourceGroup});
-
                     URI osDiskURI = null;
                     String managedOsDiskId = null;
                     if (StringUtils.containsIgnoreCase(resource.type(), "virtualMachine")) {
@@ -548,9 +539,7 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                             "cleanLeakedResources: completed retrieving VM {0} from resource group {1}",
                             new Object[]{resource.name(), resourceGroup});
                     }
-
-                    LOGGER.log(getNormalLoggingLevel(),
-                            "cleanLeakedResources: deleting {0} from resource group {1}",
+                    LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: deleting {0} from resource group {1}",
                             new Object[]{resource.name(), resourceGroup});
                     azureClient.genericResources().deleteById(resource.id());
                     if (osDiskURI != null) {
@@ -565,8 +554,7 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         azureClient.disks().deleteById(managedOsDiskId);
                         serviceDelegate.removeImage(azureClient, resource.name(), resourceGroup);
                     }
-                    LOGGER.log(getNormalLoggingLevel(),
-                        "cleanLeakedResources: deleted {0} from resource group {1}",
+                    LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: deleted {0} from resource group {1}",
                         new Object[]{resource.name(), resourceGroup});
                 } catch (Exception e) {
                     LOGGER.log(Level.WARNING, "Failed to clean resource ", e);
