@@ -22,10 +22,6 @@
     <f:textbox default="${descriptor.getDefaultDeploymentTimeout()}"/>
   </f:entry>
 
-  <f:entry title="${%Keep_Failed_VM_Deployments}" field="keepFailedVMDeployments">
-    <f:checkbox/>
-  </f:entry>
-
   <f:entry title="${%Custom_Tag}" field="cloudTags">
     <f:repeatableProperty field="cloudTags" noAddButton="${!h.hasPermission(app.ADMINISTER)}">
       <l:isAdmin>

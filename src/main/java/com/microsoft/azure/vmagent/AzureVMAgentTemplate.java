@@ -281,6 +281,8 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
 
     private boolean disableWindowsUpdates;
 
+    private boolean keepFailedVMDeployments;
+
     private int osDiskSize;
 
     private String newStorageAccountName;
@@ -981,6 +983,15 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
     @DataBoundSetter
     public void setDisableWindowsUpdates(boolean disableWindowsUpdates) {
         this.disableWindowsUpdates = disableWindowsUpdates;
+    }
+
+    public boolean isKeepFailedVMDeployments() {
+        return keepFailedVMDeployments;
+    }
+
+    @DataBoundSetter
+    public void setKeepFailedVMDeployments(boolean keepFailedVMDeployments) {
+        this.keepFailedVMDeployments = keepFailedVMDeployments;
     }
 
     @DataBoundSetter
