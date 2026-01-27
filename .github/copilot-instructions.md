@@ -7,7 +7,7 @@ This is a **Jenkins plugin** that provisions Jenkins build agents on Azure Virtu
 **Project Type:** Jenkins Plugin (HPI/JPI packaging)  
 **Language:** Java  
 **Build System:** Apache Maven  
-**Size:** ~2.3MB, 58 Java source files (~14,000 lines of code)  
+**Size:** ~2.3MB, 50+ Java source files (~14,000 lines of code)  
 **Target:** Jenkins 2.516.3+ with Java 17+
 
 ## Critical Build Information
