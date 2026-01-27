@@ -21,7 +21,7 @@ This is a **Jenkins plugin** that provisions Jenkins build agents on Azure Virtu
 The project uses Maven with Jenkins-specific extensions:
 - `.mvn/maven.config` defines incremental build profiles
 - `.mvn/extensions.xml` includes `git-changelist-maven-extension` for versioning
-- Parent POM: `org.jenkins-ci.plugins:plugin:6.2122.v70b_7b_f659d72`
+- Parent POM: See `<parent>` section in `pom.xml` for current version
 
 ### Build Commands
 
@@ -175,7 +175,7 @@ mvn checkstyle:check
 ## Dependencies and Known Issues
 
 ### Maven Dependencies
-Key dependencies (managed via BOM `bom-2.516.x`):
+Key dependencies (managed via BOM - see `<dependencyManagement>` in pom.xml):
 - `azure-credentials` - Azure authentication
 - `caffeine-api` - Caching
 - `commons-lang3-api` - Utilities
