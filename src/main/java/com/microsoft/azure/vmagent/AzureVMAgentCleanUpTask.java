@@ -73,7 +73,7 @@ import static com.microsoft.azure.vmagent.util.Constants.MILLIS_IN_MINUTE;
 public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
 
     private static class DeploymentInfo implements Serializable {
-        private static final long serialVersionUID = 888154365;
+        private static final long serialVersionUID = 888154366; // Incremented due to class structure change
 
         DeploymentInfo(String cloudName,
                        String resourceGroupName,
@@ -81,12 +81,26 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                        String scriptUri,
                        int deleteAttempts,
                        boolean isUseEntraIdForStorageAccount) {
+            this(cloudName, resourceGroupName, deploymentName, scriptUri, deleteAttempts,
+                    isUseEntraIdForStorageAccount, null, false);
+        }
+
+        DeploymentInfo(String cloudName,
+                       String resourceGroupName,
+                       String deploymentName,
+                       String scriptUri,
+                       int deleteAttempts,
+                       boolean isUseEntraIdForStorageAccount,
+                       String templateName,
+                       boolean keepFailedDeployment) {
             this.cloudName = cloudName;
             this.deploymentName = deploymentName;
             this.resourceGroupName = resourceGroupName;
             this.scriptUri = scriptUri;
             this.attemptsRemaining = deleteAttempts;
             this.isUseEntraIdForStorageAccount = isUseEntraIdForStorageAccount;
+            this.templateName = templateName;
+            this.keepFailedDeployment = keepFailedDeployment;
         }
 
         String getCloudName() {
@@ -109,6 +123,14 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
             return isUseEntraIdForStorageAccount;
         }
 
+        String getTemplateName() {
+            return templateName;
+        }
+
+        boolean isKeepFailedDeployment() {
+            return keepFailedDeployment;
+        }
+
         boolean hasAttemptsRemaining() {
             return attemptsRemaining > 0;
         }
@@ -123,6 +145,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
         private final String scriptUri;
         private int attemptsRemaining;
         private final boolean isUseEntraIdForStorageAccount;
+        private final String templateName;
+        private final boolean keepFailedDeployment;
     }
 
     private static final int CLEAN_TIMEOUT_IN_MINUTES = 15;
@@ -130,6 +154,12 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
 
     private static final long SUCCESSFUL_DEPLOYMENT_TIMEOUT_IN_MINUTES = 60;
     private static final long FAILING_DEPLOYMENT_TIMEOUT_IN_MINUTES = 60 * 8;
+    private static final int MINUTES_PER_HOUR = 60;
+    private static final int HOURS_PER_DAY = 24;
+    private static final int MAX_KEPT_FAILED_DEPLOYMENT_RETENTION_DAYS = 30;
+    // Maximum retention time for failed deployments when keepFailedDeployment is enabled
+    private static final long MAX_KEPT_FAILED_DEPLOYMENT_TIMEOUT_IN_MINUTES =
+            MINUTES_PER_HOUR * HOURS_PER_DAY * MAX_KEPT_FAILED_DEPLOYMENT_RETENTION_DAYS;
     private static final int MAX_DELETE_ATTEMPTS = 3;
     private static final Logger LOGGER = Logger.getLogger(AzureVMAgentCleanUpTask.class.getName());
 
@@ -174,11 +204,22 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                                        String deploymentName,
                                        String scriptUri,
                                        boolean isUseEntraIdForStorageAccount) {
-            LOGGER.log(Level.FINE, "Registering deployment {0} in {1}",
-                    new Object[]{deploymentName, resourceGroupName});
+            registerDeployment(cloudName, resourceGroupName, deploymentName, scriptUri,
+                    isUseEntraIdForStorageAccount, null, false);
+        }
+
+        public void registerDeployment(String cloudName,
+                                       String resourceGroupName,
+                                       String deploymentName,
+                                       String scriptUri,
+                                       boolean isUseEntraIdForStorageAccount,
+                                       String templateName,
+                                       boolean keepFailedDeployment) {
+            LOGGER.log(Level.FINE, "Registering deployment {0} in {1} (template: {2}, keepFailed: {3})",
+                    new Object[]{deploymentName, resourceGroupName, templateName, keepFailedDeployment});
             DeploymentInfo newDeploymentToClean =
                     new DeploymentInfo(cloudName, resourceGroupName, deploymentName, scriptUri, MAX_DELETE_ATTEMPTS,
-                            isUseEntraIdForStorageAccount);
+                            isUseEntraIdForStorageAccount, templateName, keepFailedDeployment);
             deploymentsToClean.add(newDeploymentToClean);
 
             syncDeploymentsToClean();
@@ -210,10 +251,23 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
         DeploymentInfo firstBackInQueue = null;
         ConcurrentLinkedQueue<DeploymentInfo> deploymentsToClean
                 = DeploymentRegistrar.getInstance().getDeploymentsToClean();
+
+        // Log deployments that have keepFailedDeployment enabled
+        long protectedDeployments = deploymentsToClean.stream()
+                .filter(DeploymentInfo::isKeepFailedDeployment)
+                .count();
+        if (protectedDeployments > 0) {
+            LOGGER.log(getNormalLoggingLevel(),
+                    "{0} deployment(s) in queue have keepFailedDeployment protection enabled",
+                    protectedDeployments);
+        }
+
         while (!deploymentsToClean.isEmpty() && firstBackInQueue != deploymentsToClean.peek()) {
             DeploymentInfo info = deploymentsToClean.remove();
 
-            LOGGER.log(getNormalLoggingLevel(), "Checking deployment {0}", info.getDeploymentName());
+            LOGGER.log(getNormalLoggingLevel(), "Checking deployment {0} (template: {1}, protected: {2})",
+                    new Object[]{info.getDeploymentName(), info.getTemplateName(),
+                            info.isKeepFailedDeployment()});
 
             AzureVMCloud cloud = getCloud(info.getCloudName());
 
@@ -250,14 +304,41 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                 String state = deployment.provisioningState();
 
                 if (!state.equalsIgnoreCase("succeeded") && diffTimeInMinutes > failTimeoutInMinutes) {
-                    LOGGER.log(getNormalLoggingLevel(), "Failed deployment older than {0} minutes, deleting",
-                            failTimeoutInMinutes);
-                    // Delete the deployment
-                    azureClient.deployments()
-                            .deleteByResourceGroup(info.getResourceGroupName(), info.getDeploymentName());
-                    if (StringUtils.isNotBlank(info.scriptUri)) {
-                        delegate.removeStorageBlob(new URI(info.scriptUri), info.getResourceGroupName(),
-                                cloud.getAzureCredentialsId(), info.isUseEntraIdForStorageAccount());
+                    // Check if we should keep failed deployments
+                    if (info.isKeepFailedDeployment()
+                            && diffTimeInMinutes <= MAX_KEPT_FAILED_DEPLOYMENT_TIMEOUT_IN_MINUTES) {
+                        LOGGER.log(getNormalLoggingLevel(),
+                                "Failed deployment {0} older than {1} minutes, but keepFailedDeployment "
+                                + "is enabled (template: {2}), preserving deployment record "
+                                + "(age: {3} minutes, max retention: {4} days)",
+                                new Object[]{info.getDeploymentName(), failTimeoutInMinutes,
+                                        info.getTemplateName(), diffTimeInMinutes,
+                                        MAX_KEPT_FAILED_DEPLOYMENT_RETENTION_DAYS});
+
+                        if (firstBackInQueue == null) {
+                            firstBackInQueue = info;
+                        }
+                        // Put it back in the queue to keep it
+                        deploymentsToClean.add(info);
+                    } else {
+                        if (info.isKeepFailedDeployment()) {
+                            LOGGER.log(getNormalLoggingLevel(),
+                                    "Failed deployment {0} exceeded maximum retention period ({1} days), "
+                                    + "deleting",
+                                    new Object[]{info.getDeploymentName(),
+                                            MAX_KEPT_FAILED_DEPLOYMENT_RETENTION_DAYS});
+                        } else {
+                            LOGGER.log(getNormalLoggingLevel(),
+                                    "Failed deployment older than {0} minutes, deleting",
+                                    failTimeoutInMinutes);
+                        }
+                        // Delete the deployment
+                        azureClient.deployments()
+                                .deleteByResourceGroup(info.getResourceGroupName(), info.getDeploymentName());
+                        if (StringUtils.isNotBlank(info.getScriptUri())) {
+                            delegate.removeStorageBlob(new URI(info.getScriptUri()), info.getResourceGroupName(),
+                                    cloud.getAzureCredentialsId(), info.isUseEntraIdForStorageAccount());
+                        }
                     }
                 } else if (state.equalsIgnoreCase("succeeded")
                         && diffTimeInMinutes > successTimeoutInMinutes) {
@@ -266,8 +347,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                     // Delete the deployment
                     azureClient.deployments()
                             .deleteByResourceGroup(info.getResourceGroupName(), info.getDeploymentName());
-                    if (StringUtils.isNotBlank(info.scriptUri)) {
-                        delegate.removeStorageBlob(new URI(info.scriptUri), info.getResourceGroupName(),
+                    if (StringUtils.isNotBlank(info.getScriptUri())) {
+                        delegate.removeStorageBlob(new URI(info.getScriptUri()), info.getResourceGroupName(),
                                 cloud.getAzureCredentialsId(), info.isUseEntraIdForStorageAccount());
                     }
                 } else {
@@ -348,20 +429,17 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                                 + "valid credential");
                 return;
             }
-
             final AzureVMManagementServiceDelegate serviceDelegate = cloud.getServiceDelegate();
             // can't use listByTag because for some reason that method strips all the tags from the outputted resources
             // (https://github.com/Azure/azure-sdk-for-java/issues/1436)
             final PagedIterable<GenericResource> resources = azureClient.genericResources()
                     .listByResourceGroup(resourceGroup);
 
-
             if (resources == null || !resources.iterator().hasNext()) {
                 LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: No resources found in rg: "
                     + resourceGroup);
                 return;
             }
-
             final PriorityQueue<GenericResource> resourcesMarkedForDeletion = new PriorityQueue<>(10,
                     new Comparator<GenericResource>() {
                         @Override
@@ -408,9 +486,26 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         break;
                     }
                 }
+                // Check if this resource's template has keepFailedVMDeployments enabled
+                if (!shouldSkipDeletion && tags.containsKey(Constants.AZURE_TEMPLATE_TAG_NAME)) {
+                    String templateName = tags.get(Constants.AZURE_TEMPLATE_TAG_NAME);
+                    try {
+                        AzureVMAgentTemplate template = cloud.getTemplate(templateName);
+                        if (template != null && template.isKeepFailedVMDeployments()) {
+                            LOGGER.log(getNormalLoggingLevel(),
+                                    "cleanLeakedResources: resource {0} has keepFailedVMDeployments enabled "
+                                    + "(template: {1}), skipping deletion",
+                                    new Object[]{resource.name(), templateName});
+                            shouldSkipDeletion = true;
+                        }
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING,
+                                "cleanLeakedResources: failed to check template {0} for resource {1}",
+                                new Object[]{templateName, resource.name()});
+                    }
+                }
                 // we're not removing storage accounts of networks - someone else might be using them
-                if (shouldSkipDeletion
-                        || StringUtils.containsIgnoreCase(resource.type(), "StorageAccounts")
+                if (shouldSkipDeletion || StringUtils.containsIgnoreCase(resource.type(), "StorageAccounts")
                         || StringUtils.containsIgnoreCase(resource.type(), "virtualNetworks")) {
                     continue;
                 }
@@ -419,7 +514,6 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
 
             LOGGER.log(getNormalLoggingLevel(), String.format("cleanLeakedResources: %d resources marked for deletion",
                     resourcesMarkedForDeletion.size()));
-
             while (!resourcesMarkedForDeletion.isEmpty()) {
                 try {
                     final GenericResource resource = resourcesMarkedForDeletion.poll();
@@ -427,10 +521,8 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: resource was null continuing");
                         continue;
                     }
-                    LOGGER.log(getNormalLoggingLevel(),
-                        "cleanLeakedResources: looking at {0} from resource group {1}",
+                    LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: looking at {0} from resource group {1}",
                         new Object[]{resource.name(), resourceGroup});
-
                     URI osDiskURI = null;
                     String managedOsDiskId = null;
                     if (StringUtils.containsIgnoreCase(resource.type(), "virtualMachine")) {
@@ -447,9 +539,7 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                             "cleanLeakedResources: completed retrieving VM {0} from resource group {1}",
                             new Object[]{resource.name(), resourceGroup});
                     }
-
-                    LOGGER.log(getNormalLoggingLevel(),
-                            "cleanLeakedResources: deleting {0} from resource group {1}",
+                    LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: deleting {0} from resource group {1}",
                             new Object[]{resource.name(), resourceGroup});
                     azureClient.genericResources().deleteById(resource.id());
                     if (osDiskURI != null) {
@@ -464,8 +554,7 @@ public class AzureVMAgentCleanUpTask extends AsyncPeriodicWork {
                         azureClient.disks().deleteById(managedOsDiskId);
                         serviceDelegate.removeImage(azureClient, resource.name(), resourceGroup);
                     }
-                    LOGGER.log(getNormalLoggingLevel(),
-                        "cleanLeakedResources: deleted {0} from resource group {1}",
+                    LOGGER.log(getNormalLoggingLevel(), "cleanLeakedResources: deleted {0} from resource group {1}",
                         new Object[]{resource.name(), resourceGroup});
                 } catch (Exception e) {
                     LOGGER.log(Level.WARNING, "Failed to clean resource ", e);
