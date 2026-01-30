@@ -880,26 +880,7 @@ public class AzureVMCloud extends Cloud {
                                 }
 
                                 try {
-                                    LOGGER.log(Level.FINE, "Adding agent {0} to Jenkins nodes",
-                                            agent.getNodeName());
-                                    // Place the node in blocked state while it starts.
-                                    try {
-                                        agent.blockCleanUpAction();
-                                        Jenkins.get().addNode(agent);
-                                        Computer computer = agent.toComputer();
-                                        if (agent.getAgentLaunchMethod().equalsIgnoreCase("SSH")
-                                                && computer != null) {
-                                            computer.connect(false).get();
-                                        } else if (agent.getAgentLaunchMethod()
-                                                .equalsIgnoreCase("JNLP")) {
-                                            // Wait until node is online
-                                            waitUntilJNLPNodeIsOnline(agent);
-                                        }
-                                    } finally {
-                                        // Place node in default state, now can be
-                                        // dealt with by the cleanup task.
-                                        agent.clearCleanUpAction();
-                                    }
+                                    registerAndConnectAgent(agent);
                                 } catch (Exception e) {
                                     LOGGER.log(
                                             Level.SEVERE,
@@ -961,6 +942,31 @@ public class AzureVMCloud extends Cloud {
                             template.handleTemplateProvisioningFailure(e.getMessage(), stage);
                         }
                     })));
+        }
+    }
+
+    /**
+     * Register agent with Jenkins and establish connection.
+     *
+     * @param agent The agent to register
+     * @throws Exception if registration or connection fails
+     */
+    private void registerAndConnectAgent(AzureVMAgent agent) throws Exception {
+        LOGGER.log(Level.FINE, "Adding agent {0} to Jenkins nodes", agent.getNodeName());
+        // Place the node in blocked state while it starts.
+        try {
+            agent.blockCleanUpAction();
+            Jenkins.get().addNode(agent);
+            Computer computer = agent.toComputer();
+            if (agent.getAgentLaunchMethod().equalsIgnoreCase("SSH") && computer != null) {
+                computer.connect(false).get();
+            } else if (agent.getAgentLaunchMethod().equalsIgnoreCase("JNLP")) {
+                // Wait until node is online
+                waitUntilJNLPNodeIsOnline(agent);
+            }
+        } finally {
+            // Place node in default state, now can be dealt with by the cleanup task.
+            agent.clearCleanUpAction();
         }
     }
 
