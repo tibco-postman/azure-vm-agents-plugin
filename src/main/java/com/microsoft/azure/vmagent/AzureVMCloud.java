@@ -949,9 +949,13 @@ public class AzureVMCloud extends Cloud {
      * Register agent with Jenkins and establish connection.
      *
      * @param agent The agent to register
-     * @throws Exception if registration or connection fails
+     * @throws IOException if adding the agent to Jenkins fails
+     * @throws ExecutionException if the connection execution fails
+     * @throws InterruptedException if the connection is interrupted
+     * @throws AzureCloudException if waiting for JNLP node fails
      */
-    private void registerAndConnectAgent(AzureVMAgent agent) throws Exception {
+    private void registerAndConnectAgent(AzureVMAgent agent)
+            throws IOException, ExecutionException, InterruptedException, AzureCloudException {
         LOGGER.log(Level.FINE, "Adding agent {0} to Jenkins nodes", agent.getNodeName());
         // Place the node in blocked state while it starts.
         try {
