@@ -550,7 +550,7 @@ public class AzureVMCloud extends Cloud {
      * @throws AzureCloudException if deployment failed (non-OS-provisioning error)
      */
     private AzureVMAgent checkDeploymentStatus(
-            AzureResourceManager azureClient,
+            AzureResourceManager newAzureClient,
             ProvisioningActivity.Id provisioningId,
             AzureVMAgentTemplate template,
             String vmName,
@@ -561,7 +561,7 @@ public class AzureVMCloud extends Cloud {
             int timeoutInSeconds,
             long startTimeMs) throws AzureCloudException {
 
-        final Deployment dep = azureClient.deployments()
+        final Deployment dep = newAzureClient.deployments()
                 .getByResourceGroup(template.getResourceGroupName(), deploymentName);
         if (dep == null) {
             throw AzureCloudException.create(
@@ -585,7 +585,7 @@ public class AzureVMCloud extends Cloud {
                     handleDeploymentFailure(deploymentName, state, type, resource,
                             op.statusCode(), op.statusMessage(), timeoutInSeconds, startTimeMs);
                 } else if (state.equalsIgnoreCase("succeeded")) {
-                    return createSuccessfulAgent(azureClient, provisioningId, template,
+                    return createSuccessfulAgent(newAzureClient, provisioningId, template,
                             vmName, deploymentName, resource);
                 } else {
                     logDeploymentProgress(deploymentName, state, type, resource,
@@ -631,12 +631,12 @@ public class AzureVMCloud extends Cloud {
         }
     }
 
-    private AzureVMAgent createSuccessfulAgent(AzureResourceManager azureClient,
+    private AzureVMAgent createSuccessfulAgent(AzureResourceManager newAzureClient,
             ProvisioningActivity.Id provisioningId, AzureVMAgentTemplate template,
             String vmName, String deploymentName, String resource) throws AzureCloudException {
 
         LOGGER.log(Level.FINE, "VM available: {0}", resource);
-        final VirtualMachine vm = azureClient.virtualMachines()
+        final VirtualMachine vm = newAzureClient.virtualMachines()
                 .getByResourceGroup(template.getResourceGroupName(), resource);
         final OperatingSystemTypes osType = vm.storageProfile().osDisk().osType();
 
