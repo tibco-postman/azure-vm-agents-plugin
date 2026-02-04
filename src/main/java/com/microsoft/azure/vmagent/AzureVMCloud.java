@@ -587,9 +587,31 @@ public class AzureVMCloud extends Cloud {
                                 final String statusCode = op.statusCode();
                                 final Object statusMessage = op.statusMessage();
                                 String finalStatusMessage = getStatusMessage(statusCode, statusMessage);
-                                throw AzureCloudException.create(
-                                        String.format("Deployment %s: %s:%s - %s",
-                                                state, type, resource, finalStatusMessage));
+                                
+                                // Check if this is an Azure OS provisioning timeout
+                                // Azure may report "Conflict" with "OS Provisioning...did not finish in the allotted time"
+                                // but also says "The VM may still finish provisioning successfully"
+                                boolean isOsProvisioningTimeout = finalStatusMessage != null 
+                                        && finalStatusMessage.contains("OS Provisioning") 
+                                        && finalStatusMessage.contains("did not finish in the allotted time");
+                                
+                                if (isOsProvisioningTimeout) {
+                                    int waitedSeconds = (maxTries - triesLeft) * sleepTimeInSeconds;
+                                    LOGGER.log(Level.WARNING,
+                                            "Azure OS provisioning timeout detected for VM {0} after {1} seconds. "
+                                            + "This is an Azure-side timeout (typically ~10 minutes), not Jenkins timeout. "
+                                            + "Azure reports the VM may still finish provisioning. "
+                                            + "Continuing to wait up to Jenkins timeout ({2} seconds total). "
+                                            + "Error: {3}",
+                                            new Object[]{resource, waitedSeconds, timeoutInSeconds, finalStatusMessage});
+                                    // Continue waiting - don't throw exception yet
+                                    // Let Jenkins timeout handle ultimate failure if VM never completes
+                                } else {
+                                    // For other failures (not OS provisioning timeout), fail immediately
+                                    throw AzureCloudException.create(
+                                            String.format("Deployment %s: %s:%s - %s",
+                                                    state, type, resource, finalStatusMessage));
+                                }
                             } else if (state.equalsIgnoreCase("succeeded")) {
                                 LOGGER.log(Level.FINE, "VM available: {0}", resource);
 
@@ -626,7 +648,13 @@ public class AzureVMCloud extends Cloud {
         } while (triesLeft > 0);
 
         throw AzureCloudException.create(String.format(
-                "Deployment %s failed, max timeout reached (%d seconds)",
+                "Deployment %s failed: Jenkins deployment timeout reached (%d seconds). "
+                + "The VM deployment did not complete within the configured timeout. "
+                + "This may be due to slow VM provisioning or Azure OS provisioning issues. "
+                + "Consider: 1) Increasing deploymentTimeout in Advanced settings, "
+                + "2) Using a properly prepared/generalized image, "
+                + "3) Checking Azure service health. "
+                + "See: https://learn.microsoft.com/azure/virtual-machines/linux/create-upload-generic",
                 deploymentName, timeoutInSeconds));
     }
 
