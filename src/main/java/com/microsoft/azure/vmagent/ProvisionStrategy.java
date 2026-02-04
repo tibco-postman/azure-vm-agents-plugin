@@ -5,6 +5,7 @@ import org.kohsuke.stapler.DataBoundConstructor;
 
 public class ProvisionStrategy {
     private static final long INIT_INTERVAL = 10 * 1000; // 10 seconds
+    private static final long MILLIS_PER_SECOND = 1000L;
 
     private final long maxInterval; // Configurable, in milliseconds
 
@@ -18,9 +19,9 @@ public class ProvisionStrategy {
     public ProvisionStrategy() {
         this(Constants.DEFAULT_MAX_RETRY_INTERVAL_SEC);
     }
-    
+
     public ProvisionStrategy(int maxIntervalSeconds) {
-        this.maxInterval = maxIntervalSeconds * 1000L; // Convert to milliseconds
+        this.maxInterval = maxIntervalSeconds * MILLIS_PER_SECOND; // Convert to milliseconds
         this.interval = INIT_INTERVAL;
         this.configurationStatus = Constants.UNVERIFIED;
         this.lastFailureTime = 0;
