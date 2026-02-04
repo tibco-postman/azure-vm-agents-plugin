@@ -543,24 +543,40 @@ public class AzureVMCloud extends Cloud {
         final int sleepTimeInSeconds = 5;
         final int timeoutInSeconds = getDeploymentTimeout();
         final int maxTries = timeoutInSeconds / sleepTimeInSeconds;
+        final long startTimeMs = System.currentTimeMillis();
         
-        LOGGER.log(Level.INFO, "Waiting for deployment {0} with VM {1} to be completed. "
-                + "Deployment timeout: {2} seconds ({3} minutes), max polling attempts: {4}",
-                new Object[]{deploymentName, vmName, timeoutInSeconds, timeoutInSeconds / 60, maxTries});
+        LOGGER.log(Level.INFO, "[DIAGNOSTIC] Starting deployment wait for {0} with VM {1}. "
+                + "Deployment timeout: {2} seconds ({3} minutes), max polling attempts: {4}, "
+                + "start time: {5}",
+                new Object[]{deploymentName, vmName, timeoutInSeconds, timeoutInSeconds / 60, maxTries, 
+                    new java.util.Date(startTimeMs)});
 
         int triesLeft = maxTries;
         do {
             triesLeft--;
+            final long currentElapsedMs = System.currentTimeMillis() - startTimeMs;
+            final int elapsedSeconds = (int) (currentElapsedMs / 1000);
+            
+            // Log at critical time points for diagnostic purposes
+            if (elapsedSeconds > 0 && (elapsedSeconds % 300 == 0 || elapsedSeconds >= 590 && elapsedSeconds <= 610)) {
+                LOGGER.log(Level.INFO, "[DIAGNOSTIC] Deployment {0}: Elapsed time {1} seconds ({2} minutes), "
+                        + "tries left: {3}",
+                        new Object[]{deploymentName, elapsedSeconds, elapsedSeconds / 60, triesLeft});
+            }
+            
             try {
                 Thread.sleep(sleepTimeInSeconds * MILLIS_IN_SECOND);
             } catch (InterruptedException ex) {
-                // ignore
+                LOGGER.log(Level.WARNING, "[DIAGNOSTIC] Sleep interrupted for deployment {0}", deploymentName);
             }
 
             try {
                 // Create a new RM client each time because the config may expire while
                 // in this long running operation
                 final AzureResourceManager newAzureClient = template.retrieveAzureCloudReference().getAzureClient();
+                
+                LOGGER.log(Level.FINEST, "[DIAGNOSTIC] Deployment {0}: Polling attempt {1}, elapsed {2}s",
+                        new Object[]{deploymentName, (maxTries - triesLeft), elapsedSeconds});
 
                 final Deployment dep = newAzureClient.deployments()
                         .getByResourceGroup(template.getResourceGroupName(), deploymentName);
@@ -588,6 +604,14 @@ public class AzureVMCloud extends Cloud {
                                 final Object statusMessage = op.statusMessage();
                                 String finalStatusMessage = getStatusMessage(statusCode, statusMessage);
                                 
+                                final long currentElapsedMs = System.currentTimeMillis() - startTimeMs;
+                                final int elapsedSeconds = (int) (currentElapsedMs / 1000);
+                                
+                                LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] Deployment {0} failed at {1} seconds. "
+                                        + "State: {2}, Status code: {3}, VM: {4}, Type: {5}, Message: {6}",
+                                        new Object[]{deploymentName, elapsedSeconds, state, statusCode, 
+                                            resource, type, finalStatusMessage});
+                                
                                 // Check if this is an Azure OS provisioning timeout
                                 // Azure may report "Conflict" with "OS Provisioning...did not finish in the allotted time"
                                 // but also says "The VM may still finish provisioning successfully"
@@ -596,17 +620,17 @@ public class AzureVMCloud extends Cloud {
                                         && finalStatusMessage.contains("did not finish in the allotted time");
                                 
                                 if (isOsProvisioningTimeout) {
-                                    int waitedSeconds = (maxTries - triesLeft) * sleepTimeInSeconds;
                                     LOGGER.log(Level.WARNING,
-                                            "Azure OS provisioning timeout detected for VM {0} after {1} seconds. "
-                                            + "This is an Azure-side timeout (typically ~10 minutes), not Jenkins timeout. "
-                                            + "Azure reports the VM may still finish provisioning. "
+                                            "[DIAGNOSTIC] Detected OS provisioning timeout pattern at {0} seconds for VM {1}. "
+                                            + "Azure support confirms NO Azure-defined 10-minute timeout exists. "
+                                            + "This may be HTTP client timeout or other plugin timeout. "
                                             + "Continuing to wait up to Jenkins timeout ({2} seconds total). "
                                             + "Error: {3}",
-                                            new Object[]{resource, waitedSeconds, timeoutInSeconds, finalStatusMessage});
+                                            new Object[]{elapsedSeconds, resource, timeoutInSeconds, finalStatusMessage});
                                     // Continue waiting - don't throw exception yet
                                     // Let Jenkins timeout handle ultimate failure if VM never completes
                                 } else {
+                                    LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] Non-OS-provisioning error, failing immediately");
                                     // For other failures (not OS provisioning timeout), fail immediately
                                     throw AzureCloudException.create(
                                             String.format("Deployment %s: %s:%s - %s",
@@ -641,11 +665,29 @@ public class AzureVMCloud extends Cloud {
                     }
                 }
             } catch (AzureCloudException e) {
+                final long currentElapsedMs = System.currentTimeMillis() - startTimeMs;
+                final int elapsedSeconds = (int) (currentElapsedMs / 1000);
+                LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] AzureCloudException caught for deployment {0} at {1} seconds. "
+                        + "Exception type: {2}, Message: {3}",
+                        new Object[]{deploymentName, elapsedSeconds, e.getClass().getName(), e.getMessage()});
                 throw e;
             } catch (Exception e) {
+                final long currentElapsedMs = System.currentTimeMillis() - startTimeMs;
+                final int elapsedSeconds = (int) (currentElapsedMs / 1000);
+                LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] Unexpected exception for deployment {0} at {1} seconds. "
+                        + "Exception type: {2}, Message: {3}, Cause: {4}",
+                        new Object[]{deploymentName, elapsedSeconds, e.getClass().getName(), e.getMessage(), 
+                            e.getCause() != null ? e.getCause().getClass().getName() + ": " + e.getCause().getMessage() : "none"});
+                LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] Full stack trace:", e);
                 throw AzureCloudException.create(e);
             }
         } while (triesLeft > 0);
+
+        final long totalElapsedMs = System.currentTimeMillis() - startTimeMs;
+        final int totalElapsedSeconds = (int) (totalElapsedMs / 1000);
+        LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] Deployment {0} reached Jenkins timeout. "
+                + "Configured timeout: {1}s, Actual elapsed: {2}s",
+                new Object[]{deploymentName, timeoutInSeconds, totalElapsedSeconds});
 
         throw AzureCloudException.create(String.format(
                 "Deployment %s failed: Jenkins deployment timeout reached (%d seconds). "
