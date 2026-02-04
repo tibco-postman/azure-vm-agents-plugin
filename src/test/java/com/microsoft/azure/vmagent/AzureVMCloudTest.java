@@ -285,7 +285,7 @@ class AzureVMCloudTest {
     }
 
     private static AzureVMCloud mkInstance(int maxVMsLimitForCloud) {
-        return new AzureVMCloud(null, null, Integer.toString(maxVMsLimitForCloud), null, null, null, null, null);
+        return new AzureVMCloud(null, null, Integer.toString(maxVMsLimitForCloud), null, null, null, null, null, null);
     }
 
     private static AzureVMCloud mkInstance() {
