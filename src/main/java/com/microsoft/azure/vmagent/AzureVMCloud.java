@@ -127,6 +127,8 @@ public class AzureVMCloud extends Cloud {
     private transient List<AzureVMAgentTemplate> instTemplates;
 
     private final int deploymentTimeout;
+    
+    private final int maxRetryIntervalSeconds;
 
     private static ExecutorService threadPool;
 
@@ -151,6 +153,7 @@ public class AzureVMCloud extends Cloud {
             String azureCredentialsId,
             String maxVirtualMachinesLimit,
             String deploymentTimeout,
+            String maxRetryIntervalSeconds,
             String resourceGroupReferenceType,
             String newResourceGroupName,
             String existingResourceGroupName,
@@ -180,6 +183,12 @@ public class AzureVMCloud extends Cloud {
             this.deploymentTimeout = Constants.DEFAULT_DEPLOYMENT_TIMEOUT_SEC;
         } else {
             this.deploymentTimeout = Integer.parseInt(deploymentTimeout);
+        }
+        
+        if (StringUtils.isBlank(maxRetryIntervalSeconds) || !maxRetryIntervalSeconds.matches(Constants.REG_EX_DIGIT)) {
+            this.maxRetryIntervalSeconds = Constants.DEFAULT_MAX_RETRY_INTERVAL_SEC;
+        } else {
+            this.maxRetryIntervalSeconds = Integer.parseInt(maxRetryIntervalSeconds);
         }
 
         this.configurationStatus = Constants.UNVERIFIED;
@@ -308,6 +317,10 @@ public class AzureVMCloud extends Cloud {
 
     public int getDeploymentTimeout() {
         return deploymentTimeout;
+    }
+    
+    public int getMaxRetryIntervalSeconds() {
+        return maxRetryIntervalSeconds;
     }
 
     public String getAzureCredentialsId() {
@@ -1353,6 +1366,10 @@ public class AzureVMCloud extends Cloud {
 
         public int getDefaultDeploymentTimeout() {
             return Constants.DEFAULT_DEPLOYMENT_TIMEOUT_SEC;
+        }
+        
+        public int getDefaultMaxRetryInterval() {
+            return Constants.DEFAULT_MAX_RETRY_INTERVAL_SEC;
         }
 
         public String getDefaultResourceGroupName() {

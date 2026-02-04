@@ -471,7 +471,8 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
         this.doNotUseMachineIfInitFails = doNotUseMachineIfInitFails;
         this.templateStatusDetails = "";
         // Reset the template verification status.
-        this.templateProvisionStrategy = new ProvisionStrategy();
+        this.templateProvisionStrategy = new ProvisionStrategy(
+                retrieveAzureCloudReference().getMaxRetryIntervalSeconds());
         this.retentionStrategy = retentionStrategy;
 
         // Forms data which is not persisted
@@ -835,7 +836,8 @@ public class AzureVMAgentTemplate implements Describable<AzureVMAgentTemplate>, 
     @SuppressWarnings("ConstantConditions") // fields are assigned by xstream
     private Object readResolve() {
         labelDataSet = Label.parse(labels);
-        templateProvisionStrategy = new ProvisionStrategy();
+        templateProvisionStrategy = new ProvisionStrategy(
+                retrieveAzureCloudReference().getMaxRetryIntervalSeconds());
 
         if (StringUtils.isBlank(storageAccountType)) {
             storageAccountType = SkuName.STANDARD_LRS.toString();

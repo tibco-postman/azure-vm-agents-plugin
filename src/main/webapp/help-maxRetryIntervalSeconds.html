@@ -1,0 +1,22 @@
+<div>
+    Maximum retry interval in seconds for provisioning attempts after failures.<br/>
+    <br/>
+    Default: 600 seconds (10 minutes)<br/>
+    <br/>
+    When VM provisioning fails, the plugin uses exponential backoff before retrying.
+    The retry interval starts at 10 seconds and doubles with each failure, up to this maximum.<br/>
+    <br/>
+    <strong>Example:</strong><br/>
+    - 1st failure: wait 10 seconds before retry<br/>
+    - 2nd failure: wait 20 seconds before retry<br/>
+    - 3rd failure: wait 40 seconds before retry<br/>
+    - 4th failure: wait 80 seconds before retry<br/>
+    - 5th failure: wait 160 seconds before retry<br/>
+    - 6th+ failures: wait up to this maximum (default 600s) before retry<br/>
+    <br/>
+    This is different from <strong>Deployment Timeout</strong>, which controls how long to wait
+    for a single VM deployment to complete.<br/>
+    <br/>
+    <strong>Note:</strong> This setting is unrelated to Azure's deployment timeouts. Azure support
+    confirms there is no Azure-defined 10-minute timeout for VM provisioning.
+</div>
