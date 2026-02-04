@@ -540,12 +540,14 @@ public class AzureVMCloud extends Cloud {
             String vmName,
             String deploymentName) throws AzureCloudException {
 
-        LOGGER.log(Level.INFO, "Waiting for deployment {0} with VM {1} to be completed",
-                new Object[]{deploymentName, vmName});
-
         final int sleepTimeInSeconds = 5;
         final int timeoutInSeconds = getDeploymentTimeout();
         final int maxTries = timeoutInSeconds / sleepTimeInSeconds;
+        
+        LOGGER.log(Level.INFO, "Waiting for deployment {0} with VM {1} to be completed. "
+                + "Deployment timeout: {2} seconds ({3} minutes), max polling attempts: {4}",
+                new Object[]{deploymentName, vmName, timeoutInSeconds, timeoutInSeconds / 60, maxTries});
+
         int triesLeft = maxTries;
         do {
             triesLeft--;
@@ -600,10 +602,18 @@ public class AzureVMCloud extends Cloud {
                                 getServiceDelegate().setVirtualMachineDetails(newAgent, template);
                                 return newAgent;
                             } else {
-                                LOGGER.log(Level.FINE,
-                                        "Deployment {0} not yet finished ({1}): {2}:{3} - waited {4} seconds",
-                                        new Object[]{deploymentName, state, type, resource,
-                                                (maxTries - triesLeft) * sleepTimeInSeconds});
+                                int waitedSeconds = (maxTries - triesLeft) * sleepTimeInSeconds;
+                                // Log every minute to track progress
+                                if (waitedSeconds > 0 && waitedSeconds % 60 == 0) {
+                                    LOGGER.log(Level.INFO,
+                                            "Deployment {0} not yet finished ({1}): {2}:{3} - waited {4} seconds ({5} minutes), {6} seconds remaining",
+                                            new Object[]{deploymentName, state, type, resource,
+                                                    waitedSeconds, waitedSeconds / 60, timeoutInSeconds - waitedSeconds});
+                                } else {
+                                    LOGGER.log(Level.FINE,
+                                            "Deployment {0} not yet finished ({1}): {2}:{3} - waited {4} seconds",
+                                            new Object[]{deploymentName, state, type, resource, waitedSeconds});
+                                }
                             }
                         }
                     }
