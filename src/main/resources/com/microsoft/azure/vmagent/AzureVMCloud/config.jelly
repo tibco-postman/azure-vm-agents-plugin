@@ -17,11 +17,6 @@
     <f:number default="${descriptor.defaultMaxVMLimit}"/>
   </f:entry>
 
-  <f:entry title="${%Deployment_Timeout}" field="deploymentTimeout"
-           help="/plugin/azure-vm-agents/help-deploymentTimeout.html">
-    <f:textbox default="${descriptor.getDefaultDeploymentTimeout()}"/>
-  </f:entry>
-
   <f:entry title="${%Custom_Tag}" field="cloudTags">
     <f:repeatableProperty field="cloudTags" noAddButton="${!h.hasPermission(app.ADMINISTER)}">
       <l:isAdmin>
@@ -51,9 +46,21 @@
     </f:radioBlock>
   </f:entry>
 
+  <f:advanced>
+    <f:entry title="${%Deployment_Timeout}" field="deploymentTimeout"
+             help="/plugin/azure-vm-agents/help-deploymentTimeout.html">
+      <f:textbox default="${descriptor.getDefaultDeploymentTimeout()}"/>
+    </f:entry>
+    
+    <f:entry title="${%Max_Retry_Interval}" field="maxRetryIntervalSeconds"
+             help="/plugin/azure-vm-agents/help-maxRetryIntervalSeconds.html">
+      <f:textbox default="${descriptor.getDefaultMaxRetryInterval()}"/>
+    </f:entry>
+  </f:advanced>
+
   <l:isAdmin>
     <f:validateButton title="${%Verify_Configuration}" progress="${%Verifying}" method="verifyConfiguration"
-      with="azureCredentialsId,maxVirtualMachinesLimit,deploymentTimeout,resourceGroupReferenceType,newResourceGroupName,existingResourceGroupName"/>
+      with="azureCredentialsId,maxVirtualMachinesLimit,deploymentTimeout,maxRetryIntervalSeconds,resourceGroupReferenceType,newResourceGroupName,existingResourceGroupName"/>
   </l:isAdmin>
 
   <!--

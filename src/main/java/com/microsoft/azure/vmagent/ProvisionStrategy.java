@@ -5,8 +5,9 @@ import org.kohsuke.stapler.DataBoundConstructor;
 
 public class ProvisionStrategy {
     private static final long INIT_INTERVAL = 10 * 1000; // 10 seconds
+    private static final long MILLIS_PER_SECOND = 1000L;
 
-    private static final long MAX_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    private final long maxInterval; // Configurable, in milliseconds
 
     private long interval;
 
@@ -16,6 +17,11 @@ public class ProvisionStrategy {
 
     @DataBoundConstructor // needed by jcasc
     public ProvisionStrategy() {
+        this(Constants.DEFAULT_MAX_RETRY_INTERVAL_SEC);
+    }
+
+    public ProvisionStrategy(int maxIntervalSeconds) {
+        this.maxInterval = maxIntervalSeconds * MILLIS_PER_SECOND; // Convert to milliseconds
         this.interval = INIT_INTERVAL;
         this.configurationStatus = Constants.UNVERIFIED;
         this.lastFailureTime = 0;
@@ -32,7 +38,7 @@ public class ProvisionStrategy {
     // Whatever verify failed or deploy failed, extend retry interval
     public synchronized void failure() {
         configurationStatus = Constants.VERIFIED_FAILED;
-        interval = Math.min(interval * 2, MAX_INTERVAL);
+        interval = Math.min(interval * 2, maxInterval);
         lastFailureTime = System.currentTimeMillis();
     }
 

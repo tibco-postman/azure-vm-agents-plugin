@@ -47,6 +47,8 @@ public final class Constants {
 
     public static final int DEFAULT_DEPLOYMENT_TIMEOUT_SEC = 1200;
 
+    public static final int DEFAULT_MAX_RETRY_INTERVAL_SEC = 600; // 10 minutes
+
     public static final int DEFAULT_IDLE_TIME = 60;
 
     public static final int MILLIS_IN_SECOND = 1000;

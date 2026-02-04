@@ -40,7 +40,7 @@ class ITAzureVMCloud extends IntegrationTest {
             final String deploymentName = "fakeDeployment";
             final ProvisioningActivity.Id provisioningId = new ProvisioningActivity.Id(vmName, deploymentName);
             AzureVMAgentTemplate templateMock = mock(AzureVMAgentTemplate.class);
-            AzureVMCloud cloudMock = spy( new AzureVMCloud("", "xyz", "42", "0", "new", testEnv.azureResourceGroup, null,null));
+            AzureVMCloud cloudMock = spy( new AzureVMCloud("", "xyz", "42", "0", null, "new", testEnv.azureResourceGroup, null, null));
 
             when(templateMock.retrieveAzureCloudReference()).thenReturn(cloudMock);
 
@@ -81,7 +81,7 @@ class ITAzureVMCloud extends IntegrationTest {
             final boolean disableWindowsUpdates = true;
 
             AzureVMAgentTemplate templateMock = mock(AzureVMAgentTemplate.class);
-            AzureVMCloud cloudMock = spy( new AzureVMCloud("", credentialsId, "42", "30", "new", testEnv.azureResourceGroup, null, null));
+            AzureVMCloud cloudMock = spy( new AzureVMCloud("", credentialsId, "42", "30", null, "new", testEnv.azureResourceGroup, null, null));
 
             when(templateMock.retrieveAzureCloudReference()).thenReturn(cloudMock);
             when(templateMock.getTemplateName()).thenReturn(templateName);

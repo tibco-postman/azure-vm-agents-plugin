@@ -106,6 +106,13 @@ public class AzureVMCloud extends Cloud {
     private static final int DEFAULT_SSH_CONNECT_RETRY_COUNT = 3;
     private static final int SHH_CONNECT_RETRY_INTERNAL_SECONDS = 20;
 
+    // Constants for diagnostic logging intervals
+    private static final int DIAGNOSTIC_LOG_INTERVAL_SECONDS = 300; // Log every 5 minutes
+    private static final int DIAGNOSTIC_LOG_AROUND_TIMEOUT_START = 590; // Log around 10 min mark
+    private static final int DIAGNOSTIC_LOG_AROUND_TIMEOUT_END = 610;
+    private static final int SECONDS_PER_MINUTE = 60;
+    private static final long MILLIS_PER_SECOND = 1000L;
+
     private final String credentialsId;
 
     private final int maxVirtualMachinesLimit;
@@ -127,6 +134,8 @@ public class AzureVMCloud extends Cloud {
     private transient List<AzureVMAgentTemplate> instTemplates;
 
     private final int deploymentTimeout;
+
+    private final int maxRetryIntervalSeconds;
 
     private static ExecutorService threadPool;
 
@@ -151,6 +160,7 @@ public class AzureVMCloud extends Cloud {
             String azureCredentialsId,
             String maxVirtualMachinesLimit,
             String deploymentTimeout,
+            String maxRetryIntervalSeconds,
             String resourceGroupReferenceType,
             String newResourceGroupName,
             String existingResourceGroupName,
@@ -180,6 +190,12 @@ public class AzureVMCloud extends Cloud {
             this.deploymentTimeout = Constants.DEFAULT_DEPLOYMENT_TIMEOUT_SEC;
         } else {
             this.deploymentTimeout = Integer.parseInt(deploymentTimeout);
+        }
+
+        if (StringUtils.isBlank(maxRetryIntervalSeconds) || !maxRetryIntervalSeconds.matches(Constants.REG_EX_DIGIT)) {
+            this.maxRetryIntervalSeconds = Constants.DEFAULT_MAX_RETRY_INTERVAL_SEC;
+        } else {
+            this.maxRetryIntervalSeconds = Integer.parseInt(maxRetryIntervalSeconds);
         }
 
         this.configurationStatus = Constants.UNVERIFIED;
@@ -308,6 +324,10 @@ public class AzureVMCloud extends Cloud {
 
     public int getDeploymentTimeout() {
         return deploymentTimeout;
+    }
+
+    public int getMaxRetryIntervalSeconds() {
+        return maxRetryIntervalSeconds;
     }
 
     public String getAzureCredentialsId() {
@@ -525,6 +545,154 @@ public class AzureVMCloud extends Cloud {
     }
 
     /**
+     * Check deployment operation status and handle accordingly.
+     * @return AzureVMAgent if deployment succeeded, null if still in progress
+     * @throws AzureCloudException if deployment failed (non-OS-provisioning error)
+     */
+    private AzureVMAgent checkDeploymentStatus(
+            AzureResourceManager newAzureClient,
+            ProvisioningActivity.Id provisioningId,
+            AzureVMAgentTemplate template,
+            String vmName,
+            String deploymentName,
+            int maxTries,
+            int triesLeft,
+            int sleepTimeInSeconds,
+            int timeoutInSeconds,
+            long startTimeMs) throws AzureCloudException {
+
+        final Deployment dep = newAzureClient.deployments()
+                .getByResourceGroup(template.getResourceGroupName(), deploymentName);
+        if (dep == null) {
+            throw AzureCloudException.create(
+                    String.format("Could not find deployment %s", deploymentName));
+        }
+
+        PagedIterable<DeploymentOperation> ops = dep.deploymentOperations().list();
+        for (DeploymentOperation op : ops) {
+            if (op.targetResource() == null) {
+                continue;
+            }
+            final String resource = op.targetResource().resourceName();
+            final String type = op.targetResource().resourceType();
+            final String state = op.provisioningState();
+            if (op.targetResource().resourceType().contains("virtualMachine")
+                    && resource.equalsIgnoreCase(vmName)) {
+
+                if (!state.equalsIgnoreCase("creating")
+                        && !state.equalsIgnoreCase("succeeded")
+                        && !state.equalsIgnoreCase("running")) {
+                    handleDeploymentFailure(deploymentName, state, type, resource,
+                            op.statusCode(), op.statusMessage(), timeoutInSeconds, startTimeMs);
+                } else if (state.equalsIgnoreCase("succeeded")) {
+                    return createSuccessfulAgent(newAzureClient, provisioningId, template,
+                            vmName, deploymentName, resource);
+                } else {
+                    logDeploymentProgress(deploymentName, state, type, resource,
+                            maxTries, triesLeft, sleepTimeInSeconds, timeoutInSeconds);
+                }
+            }
+        }
+        return null; // Still in progress
+    }
+
+    private void handleDeploymentFailure(String deploymentName, String state, String type,
+            String resource, String statusCode, Object statusMessage,
+            int timeoutInSeconds, long startTimeMs) throws AzureCloudException {
+
+        String finalStatusMessage = getStatusMessage(statusCode, statusMessage);
+        final long currentElapsedMs = System.currentTimeMillis() - startTimeMs;
+        final int elapsedSeconds = (int) (currentElapsedMs / MILLIS_PER_SECOND);
+
+        LOGGER.log(Level.SEVERE,
+                "[DIAGNOSTIC] Deployment {0} failed at {1} seconds. "
+                + "State: {2}, Status code: {3}, VM: {4}, Type: {5}, Message: {6}",
+                new Object[]{deploymentName, elapsedSeconds, state, statusCode,
+                    resource, type, finalStatusMessage});
+
+        boolean isOsProvisioningTimeout = finalStatusMessage != null
+                && finalStatusMessage.contains("OS Provisioning")
+                && finalStatusMessage.contains("did not finish in the allotted time");
+
+        if (isOsProvisioningTimeout) {
+            LOGGER.log(Level.WARNING,
+                    "[DIAGNOSTIC] Detected OS provisioning timeout pattern at {0} "
+                    + "seconds for VM {1}. Azure support confirms NO Azure-defined "
+                    + "10-minute timeout exists. This may be HTTP client timeout or "
+                    + "other plugin timeout. Continuing to wait up to Jenkins "
+                    + "timeout ({2} seconds total). Error: {3}",
+                    new Object[]{elapsedSeconds, resource, timeoutInSeconds, finalStatusMessage});
+        } else {
+            LOGGER.log(Level.SEVERE,
+                    "[DIAGNOSTIC] Non-OS-provisioning error, failing immediately");
+            throw AzureCloudException.create(
+                    String.format("Deployment %s: %s:%s - %s",
+                            state, type, resource, finalStatusMessage));
+        }
+    }
+
+    private AzureVMAgent createSuccessfulAgent(AzureResourceManager newAzureClient,
+            ProvisioningActivity.Id provisioningId, AzureVMAgentTemplate template,
+            String vmName, String deploymentName, String resource) throws AzureCloudException {
+
+        LOGGER.log(Level.FINE, "VM available: {0}", resource);
+        final VirtualMachine vm = newAzureClient.virtualMachines()
+                .getByResourceGroup(template.getResourceGroupName(), resource);
+        final OperatingSystemTypes osType = vm.storageProfile().osDisk().osType();
+
+        AzureVMAgent newAgent = getServiceDelegate().parseResponse(
+                provisioningId, vmName, deploymentName, template, osType);
+        getServiceDelegate().setVirtualMachineDetails(newAgent, template);
+        return newAgent;
+    }
+
+    private void logDeploymentProgress(String deploymentName, String state, String type,
+            String resource, int maxTries, int triesLeft, int sleepTimeInSeconds,
+            int timeoutInSeconds) {
+
+        int waitedSeconds = (maxTries - triesLeft) * sleepTimeInSeconds;
+        if (waitedSeconds > 0 && waitedSeconds % SECONDS_PER_MINUTE == 0) {
+            LOGGER.log(Level.INFO,
+                    "Deployment {0} not yet finished ({1}): {2}:{3} - waited {4} "
+                    + "seconds ({5} minutes), {6} seconds remaining",
+                    new Object[]{deploymentName, state, type, resource,
+                            waitedSeconds, waitedSeconds / SECONDS_PER_MINUTE,
+                            timeoutInSeconds - waitedSeconds});
+        } else {
+            LOGGER.log(Level.FINE,
+                    "Deployment {0} not yet finished ({1}): {2}:{3} - "
+                    + "waited {4} seconds",
+                    new Object[]{deploymentName, state, type, resource, waitedSeconds});
+        }
+    }
+
+    /**
+     * Log diagnostic information about an exception during deployment.
+     */
+    private void logDeploymentException(String deploymentName, long startTimeMs, Exception e) {
+        final long currentElapsedMs = System.currentTimeMillis() - startTimeMs;
+        final int elapsedSeconds = (int) (currentElapsedMs / MILLIS_PER_SECOND);
+
+        if (e instanceof AzureCloudException) {
+            LOGGER.log(Level.SEVERE,
+                    "[DIAGNOSTIC] AzureCloudException caught for deployment {0} at {1} seconds. "
+                    + "Exception type: {2}, Message: {3}",
+                    new Object[]{deploymentName, elapsedSeconds, e.getClass().getName(),
+                        e.getMessage()});
+        } else {
+            String causeInfo = e.getCause() != null
+                    ? e.getCause().getClass().getName() + ": " + e.getCause().getMessage()
+                    : "none";
+            LOGGER.log(Level.SEVERE,
+                    "[DIAGNOSTIC] Unexpected exception for deployment {0} at {1} seconds. "
+                    + "Exception type: {2}, Message: {3}, Cause: {4}",
+                    new Object[]{deploymentName, elapsedSeconds, e.getClass().getName(),
+                        e.getMessage(), causeInfo});
+            LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] Full stack trace:", e);
+        }
+    }
+
+    /**
      * Once a new deployment is created, construct a new AzureVMAgent object
      * given information about the template.
      *
@@ -540,83 +708,79 @@ public class AzureVMCloud extends Cloud {
             String vmName,
             String deploymentName) throws AzureCloudException {
 
-        LOGGER.log(Level.INFO, "Waiting for deployment {0} with VM {1} to be completed",
-                new Object[]{deploymentName, vmName});
-
         final int sleepTimeInSeconds = 5;
         final int timeoutInSeconds = getDeploymentTimeout();
         final int maxTries = timeoutInSeconds / sleepTimeInSeconds;
+        final long startTimeMs = System.currentTimeMillis();
+
+        LOGGER.log(Level.INFO, "[DIAGNOSTIC] Starting deployment wait for {0} with VM {1}. "
+                + "Deployment timeout: {2} seconds ({3} minutes), max polling attempts: {4}, "
+                + "start time: {5}",
+                new Object[]{deploymentName, vmName, timeoutInSeconds,
+                    timeoutInSeconds / SECONDS_PER_MINUTE, maxTries,
+                    new java.util.Date(startTimeMs)});
+
         int triesLeft = maxTries;
         do {
             triesLeft--;
+            final long currentElapsedMs = System.currentTimeMillis() - startTimeMs;
+            final int elapsedSeconds = (int) (currentElapsedMs / MILLIS_PER_SECOND);
+
+            // Log at critical time points for diagnostic purposes
+            if (elapsedSeconds > 0 && (elapsedSeconds % DIAGNOSTIC_LOG_INTERVAL_SECONDS == 0
+                    || elapsedSeconds >= DIAGNOSTIC_LOG_AROUND_TIMEOUT_START
+                    && elapsedSeconds <= DIAGNOSTIC_LOG_AROUND_TIMEOUT_END)) {
+                LOGGER.log(Level.INFO, "[DIAGNOSTIC] Deployment {0}: Elapsed time {1} seconds "
+                        + "({2} minutes), tries left: {3}",
+                        new Object[]{deploymentName, elapsedSeconds,
+                            elapsedSeconds / SECONDS_PER_MINUTE, triesLeft});
+            }
+
             try {
                 Thread.sleep(sleepTimeInSeconds * MILLIS_IN_SECOND);
             } catch (InterruptedException ex) {
-                // ignore
+                LOGGER.log(Level.WARNING, "[DIAGNOSTIC] Sleep interrupted for deployment {0}",
+                        deploymentName);
             }
 
             try {
                 // Create a new RM client each time because the config may expire while
                 // in this long running operation
-                final AzureResourceManager newAzureClient = template.retrieveAzureCloudReference().getAzureClient();
+                final AzureResourceManager newAzureClient =
+                        template.retrieveAzureCloudReference().getAzureClient();
 
-                final Deployment dep = newAzureClient.deployments()
-                        .getByResourceGroup(template.getResourceGroupName(), deploymentName);
-                // Might find no deployment.
-                if (dep == null) {
-                    throw AzureCloudException.create(
-                            String.format("Could not find deployment %s", deploymentName));
-                }
+                LOGGER.log(Level.FINEST, "[DIAGNOSTIC] Deployment {0}: Polling attempt {1}, elapsed {2}s",
+                        new Object[]{deploymentName, (maxTries - triesLeft), elapsedSeconds});
 
-                PagedIterable<DeploymentOperation> ops = dep.deploymentOperations().list();
-                for (DeploymentOperation op : ops) {
-                    if (op.targetResource() == null) {
-                        continue;
-                    }
-                    final String resource = op.targetResource().resourceName();
-                    final String type = op.targetResource().resourceType();
-                    final String state = op.provisioningState();
-                    if (op.targetResource().resourceType().contains("virtualMachine")) {
-                        if (resource.equalsIgnoreCase(vmName)) {
-
-                            if (!state.equalsIgnoreCase("creating")
-                                    && !state.equalsIgnoreCase("succeeded")
-                                    && !state.equalsIgnoreCase("running")) {
-                                final String statusCode = op.statusCode();
-                                final Object statusMessage = op.statusMessage();
-                                String finalStatusMessage = getStatusMessage(statusCode, statusMessage);
-                                throw AzureCloudException.create(
-                                        String.format("Deployment %s: %s:%s - %s",
-                                                state, type, resource, finalStatusMessage));
-                            } else if (state.equalsIgnoreCase("succeeded")) {
-                                LOGGER.log(Level.FINE, "VM available: {0}", resource);
-
-                                final VirtualMachine vm = newAzureClient.virtualMachines()
-                                        .getByResourceGroup(resourceGroupName, resource);
-                                final OperatingSystemTypes osType = vm.storageProfile().osDisk().osType();
-
-                                AzureVMAgent newAgent = getServiceDelegate().parseResponse(
-                                        provisioningId, vmName, deploymentName, template, osType);
-                                getServiceDelegate().setVirtualMachineDetails(newAgent, template);
-                                return newAgent;
-                            } else {
-                                LOGGER.log(Level.FINE,
-                                        "Deployment {0} not yet finished ({1}): {2}:{3} - waited {4} seconds",
-                                        new Object[]{deploymentName, state, type, resource,
-                                                (maxTries - triesLeft) * sleepTimeInSeconds});
-                            }
-                        }
-                    }
+                AzureVMAgent agent = checkDeploymentStatus(newAzureClient, provisioningId, template,
+                        vmName, deploymentName, maxTries, triesLeft, sleepTimeInSeconds,
+                        timeoutInSeconds, startTimeMs);
+                if (agent != null) {
+                    return agent; // Deployment succeeded
                 }
             } catch (AzureCloudException e) {
+                logDeploymentException(deploymentName, startTimeMs, e);
                 throw e;
             } catch (Exception e) {
+                logDeploymentException(deploymentName, startTimeMs, e);
                 throw AzureCloudException.create(e);
             }
         } while (triesLeft > 0);
 
+        final long totalElapsedMs = System.currentTimeMillis() - startTimeMs;
+        final int totalElapsedSeconds = (int) (totalElapsedMs / MILLIS_PER_SECOND);
+        LOGGER.log(Level.SEVERE, "[DIAGNOSTIC] Deployment {0} reached Jenkins timeout. "
+                + "Configured timeout: {1}s, Actual elapsed: {2}s",
+                new Object[]{deploymentName, timeoutInSeconds, totalElapsedSeconds});
+
         throw AzureCloudException.create(String.format(
-                "Deployment %s failed, max timeout reached (%d seconds)",
+                "Deployment %s failed: Jenkins deployment timeout reached (%d seconds). "
+                + "The VM deployment did not complete within the configured timeout. "
+                + "This may be due to slow VM provisioning or Azure OS provisioning issues. "
+                + "Consider: 1) Increasing deploymentTimeout in Advanced settings, "
+                + "2) Using a properly prepared/generalized image, "
+                + "3) Checking Azure service health. "
+                + "See: https://learn.microsoft.com/azure/virtual-machines/linux/create-upload-generic",
                 deploymentName, timeoutInSeconds));
     }
 
@@ -1273,6 +1437,10 @@ public class AzureVMCloud extends Cloud {
 
         public int getDefaultDeploymentTimeout() {
             return Constants.DEFAULT_DEPLOYMENT_TIMEOUT_SEC;
+        }
+
+        public int getDefaultMaxRetryInterval() {
+            return Constants.DEFAULT_MAX_RETRY_INTERVAL_SEC;
         }
 
         public String getDefaultResourceGroupName() {

@@ -1,3 +1,13 @@
 <div>
-    Specify the number of seconds to wait for a deployment to completed.<br>
+    Specify the number of seconds to wait for a VM deployment to complete.<br/>
+    <br/>
+    Default: 1200 seconds (20 minutes)<br/>
+    Minimum recommended: 600 seconds (10 minutes)<br/>
+    <br/>
+    This timeout controls how long Jenkins will poll Azure to check if a VM deployment has succeeded.
+    If the deployment doesn't complete within this time, the provisioning will fail and the deployment
+    may be cleaned up by the cleanup task.<br/>
+    <br/>
+    <strong>Note:</strong> If you experience timeouts shorter than configured, check your Azure SDK
+    HTTP client timeout settings and network connectivity to Azure services.
 </div>

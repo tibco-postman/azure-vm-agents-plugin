@@ -18,6 +18,8 @@ public class AzureVMCloudBuilder {
 
     private String deploymentTimeout;
 
+    private String maxRetryIntervalSeconds;
+
     private String resourceGroupReferenceType;
 
     private String newResourceGroupName;
@@ -29,6 +31,7 @@ public class AzureVMCloudBuilder {
     public AzureVMCloudBuilder() {
         maxVirtualMachinesLimit = "10";
         deploymentTimeout = "1200";
+        maxRetryIntervalSeconds = "600";
         resourceGroupReferenceType = "new";
         vmTemplates = new ArrayList<>();
     }
@@ -38,6 +41,7 @@ public class AzureVMCloudBuilder {
         azureCredentialsId = cloud.getAzureCredentialsId();
         maxVirtualMachinesLimit = String.valueOf(cloud.getMaxVirtualMachinesLimit());
         deploymentTimeout = String.valueOf(cloud.getDeploymentTimeout());
+        maxRetryIntervalSeconds = String.valueOf(cloud.getMaxRetryIntervalSeconds());
         resourceGroupReferenceType = cloud.getResourceGroupReferenceType();
         newResourceGroupName = cloud.getNewResourceGroupName();
         existingResourceGroupName = cloud.getExistingResourceGroupName();
@@ -64,6 +68,11 @@ public class AzureVMCloudBuilder {
 
     public AzureVMCloudBuilder withDeploymentTimeout(String deploymentTimeout) {
         this.deploymentTimeout = deploymentTimeout;
+        return this;
+    }
+
+    public AzureVMCloudBuilder withMaxRetryIntervalSeconds(String maxRetryIntervalSeconds) {
+        this.maxRetryIntervalSeconds = maxRetryIntervalSeconds;
         return this;
     }
 
@@ -109,6 +118,7 @@ public class AzureVMCloudBuilder {
                 StringUtils.defaultString(azureCredentialsId),
                 maxVirtualMachinesLimit,
                 deploymentTimeout,
+                maxRetryIntervalSeconds,
                 resourceGroupReferenceType,
                 StringUtils.defaultString(newResourceGroupName),
                 StringUtils.defaultString(existingResourceGroupName),
